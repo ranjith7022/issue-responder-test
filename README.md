@@ -1,89 +1,82 @@
 # 🤖 Docs-Aware Issue Responder
 
 A GitHub bot that automatically replies to new issues using **your repository's
-documentation** and **previously resolved issues** — powered by
-[GitHub Models](https://docs.github.com/en/github-models) (the same models that
-power Copilot), with **zero API keys and zero npm dependencies**.
+documentation** and **previously resolved issues** — drafted by **GitHub
+Copilot models** via the official [`actions/ai-inference`](https://github.com/actions/ai-inference)
+action (Copilot CLI provider).
+
+> ℹ️ This repo originally used GitHub Models, which GitHub retired on July 30,
+> 2026. The official replacement for AI in Actions is the Copilot-backed
+> `actions/ai-inference` action.
 
 ```
 New issue opened ──▶ GitHub Actions triggers
                         │
-                        ├─ 1. Reads the issue (title, body, labels)
-                        ├─ 2. Collects docs (README.md, docs/**, *.md)
-                        ├─ 3. Searches similar closed issues + their resolutions
-                        ├─ 4. Asks GitHub Models to draft a grounded reply
-                        └─ 5. Posts it as a comment on the issue
+                        ├─ 1. src/gather.js: reads the issue, collects docs
+                        │     (README.md, docs/**), searches similar closed issues
+                        ├─ 2. actions/ai-inference: Copilot drafts a grounded reply
+                        └─ 3. gh issue comment: posts it on the issue
 ```
 
 ## Quick start
 
-1. Copy this repository's contents into your target repo (or use it directly).
-2. Push to GitHub. **That's it** — no secrets to configure. The workflow uses:
-   - built-in `GITHUB_TOKEN` for posting comments,
-   - the same token for AI inference via the `models: read` permission.
-3. Open a test issue and watch the Actions tab.
-
-> **Requirements:** a public repo works on the free GitHub Models tier.
-> For private repos / heavy usage you may need a paid GitHub Models tier or a
-> Copilot subscription, and org admins may need to enable GitHub Models in
-> org policies.
+1. Copy these files into your target repo.
+2. Create one secret:
+   - Go to **Settings → Secrets and variables → Actions → New repository secret**
+   - Name: `COPILOT_GITHUB_TOKEN`
+   - Value: a classic personal access token created at
+     <https://github.com/settings/tokens>, tied to an account with **any
+     Copilot plan enabled** (Free tier works).
+3. Push and open a test issue — no other configuration needed.
 
 ## Files
 
 | File | Purpose |
 |---|---|
 | `.github/workflows/issue-responder.yml` | Trigger: `issues.opened` (+ manual dispatch) |
-| `src/index.js` | Orchestration: fetch → gather context → generate → post |
-| `src/context.js` | Doc collection + resolved-issue search |
-| `src/model.js` | Minimal GitHub Models chat client |
+| `src/gather.js` | Step 1: fetch issue → collect docs + resolved issues → write prompt files |
+| `src/context.js` | Doc collection + resolved-issue search helpers |
 
 ## Configuration
 
-Set these in the workflow's `env:` block:
+Edit in the workflow:
 
-| Variable | Default | Description |
+| What | Where | Default |
 |---|---|---|
-| `GITHUB_MODEL` | `openai/gpt-4o-mini` | Any model from [GitHub Marketplace models](https://github.com/marketplace/models) (e.g. `openai/gpt-4o`) |
-| `DRY_RUN` | unset | Set `"true"` to print the reply in the job log without posting |
-
-Tune behaviour in code:
-
-- **Prompt** — edit the system rules in `src/index.js` (`buildMessages`).
-- **Doc budget** — `MAX_TOTAL_DOC_CHARS`, `MAX_FILE_CHARS`, `MAX_DOC_FILES` in `src/context.js`.
-- **Similar-issue matching** — keyword count and limits in `src/context.js`.
+| Model | `Draft reply with Copilot` step | `gpt-4.1` (try `claude-sonnet-4.5`) |
+| Dry run (log only, don't post) | set env `DRY_RUN: "true"` on `Post reply`'s job | unset |
+| Prompt rules | `SYSTEM_RULES` in `src/gather.js` | grounded-answer rules |
+| Doc budget / limits | constants in `src/context.js` | 40k chars, 25 files, top-5 matches |
 
 ## Built-in safety rails
 
 - Skips issues created by bots (prevents loops).
-- Skips issues humans have already replied to.
+- Skips issues humans have already replied to (`skip=true` step output gates all later steps).
 - Never runs on pull requests.
-- The prompt forbids inventing features/links and instructs honesty when unsure.
-- Comments are clearly marked as automated.
-- `concurrency` group prevents duplicate comments per issue.
+- The prompt forbids inventing features/links; instructs honesty when unsure.
+- Comments are clearly marked as automated; concurrency group prevents duplicates.
 
 ## Testing locally
 
 ```bash
-# needs Node 18+, and a PAT with "models: read" + repo access
 export GITHUB_TOKEN=github_pat_xxx   # Windows PowerShell: $env:GITHUB_TOKEN="..."
 export REPO=owner/name
 export ISSUE_NUMBER=123
-export DRY_RUN=true                  # print instead of posting
 
-node src/index.js
+node src/gather.js                   # writes _bot/system.txt + _bot/prompt.txt
+cat _bot/prompt.txt                  # inspect what Copilot will receive
 ```
 
 ## Ideas to extend
 
 - Add an `ai-answer` label instead of replying to *every* new issue.
 - React 👍 to its own comment so users can signal "this helped".
-- Also trigger on `issue_comment` to answer follow-up questions in-thread.
-- Pair with **Copilot coding agent**: assign the issue to Copilot and it will
-  attempt an actual fix as a draft PR — this bot handles the support side.
+- Also trigger on `issue_comment` to answer follow-ups in-thread.
+- Pair with **Copilot coding agent**: assign the issue to Copilot for an actual fix PR.
 
 ## Notes & caveats
 
 - Issue search indexing can lag a few minutes after an issue closes.
-- Free-tier rate limits apply per model (~150 requests/day on some models).
+- Copilot usage consumes your plan's premium requests / AI credits.
 - Issue bodies are untrusted input; the bot only posts text, never executes
-  anything, but keep the docs folder free of secrets since it reads `*.md`.
+  anything, but keep secrets out of `*.md` files since they're read as docs.

@@ -1,8 +1,8 @@
 name: "Issue Responder"
 
 # Answers brand-new issues automatically using the repo's docs and
-# previously resolved issues. Can also be re-run manually from the
-# Actions tab for a specific issue (e.g. after improving the docs).
+# previously resolved issues, drafted by GitHub Copilot models
+# (via the official actions/ai-inference action + Copilot CLI).
 
 on:
   issues:
@@ -17,9 +17,7 @@ on:
 permissions:
   contents: read # read the checked-out documentation files
   issues: write # post comments on issues
-  models: read # lets the built-in GITHUB_TOKEN call GitHub Models
 
-# One run per issue at a time; queued runs are kept (not cancelled).
 concurrency:
   group: issue-responder-${{ github.event.issue.number || inputs.issue_number }}
   cancel-in-progress: false
@@ -38,13 +36,40 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Draft and post reply
+      - name: Gather context (docs + resolved issues)
+        id: gather
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
-          # Any model from https://github.com/marketplace/models — e.g. openai/gpt-4o
-          GITHUB_MODEL: openai/gpt-4o-mini
-          # Uncomment to test: prints the reply to the job log instead of posting
-          # DRY_RUN: "true"
-        run: node src/index.js
+        run: node src/gather.js
+
+      - name: Install Copilot CLI
+        if: steps.gather.outputs.skip != 'true'
+        run: npm install -g @github/copilot
+
+      - name: Draft reply with Copilot
+        id: inference
+        if: steps.gather.outputs.skip != 'true'
+        uses: actions/ai-inference@v1
+        with:
+          model: gpt-4.1 # also try: claude-sonnet-4.5
+          system-prompt-file: _bot/system.txt
+          prompt-file: _bot/prompt.txt
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+
+      - name: Post reply
+        if: steps.gather.outputs.skip != 'true' && env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+        run: |
+          {
+            cat "${{ steps.inference.outputs.response-file }}"
+            echo ""
+            echo "---"
+            echo "> 🤖 _Automated reply generated from this repo's docs and past resolved issues._ _If this solved your problem, feel free to close the issue — otherwise a maintainer will follow up._"
+          } > comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body-file comment.md
