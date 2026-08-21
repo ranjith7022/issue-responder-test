@@ -1,0 +1,50 @@
+name: "Issue Responder"
+
+# Answers brand-new issues automatically using the repo's docs and
+# previously resolved issues. Can also be re-run manually from the
+# Actions tab for a specific issue (e.g. after improving the docs).
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to answer"
+        required: true
+        type: string
+
+permissions:
+  contents: read # read the checked-out documentation files
+  issues: write # post comments on issues
+  models: read # lets the built-in GITHUB_TOKEN call GitHub Models
+
+# One run per issue at a time; queued runs are kept (not cancelled).
+concurrency:
+  group: issue-responder-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  respond:
+    runs-on: ubuntu-latest
+    # Never react to bots (including other bots) to avoid reply loops.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.sender.type != 'Bot' }}
+    steps:
+      - name: Check out repository (documentation source)
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Draft and post reply
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+          # Any model from https://github.com/marketplace/models — e.g. openai/gpt-4o
+          GITHUB_MODEL: openai/gpt-4o-mini
+          # Uncomment to test: prints the reply to the job log instead of posting
+          # DRY_RUN: "true"
+        run: node src/index.js
