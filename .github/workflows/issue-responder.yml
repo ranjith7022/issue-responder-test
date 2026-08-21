@@ -51,7 +51,7 @@ jobs:
       - name: Draft reply with Copilot
         id: inference
         if: steps.gather.outputs.skip != 'true'
-        uses: actions/ai-inference@v1
+        uses: actions/ai-inference@v3 # v3+ = Copilot CLI provider (GitHub Models retired July 2026)
         with:
           model: gpt-4.1 # also try: claude-sonnet-4.5
           system-prompt-file: _bot/system.txt
