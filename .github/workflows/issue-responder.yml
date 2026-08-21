@@ -53,7 +53,7 @@ jobs:
         if: steps.gather.outputs.skip != 'true'
         uses: actions/ai-inference@v3 # v3+ = Copilot CLI provider (GitHub Models retired July 2026)
         with:
-          model: gpt-4.1 # also try: claude-sonnet-4.5
+          model: "" # empty = let Copilot CLI pick a model available on your plan (or pin e.g. claude-sonnet-4.5)
           system-prompt-file: _bot/system.txt
           prompt-file: _bot/prompt.txt
         env:
